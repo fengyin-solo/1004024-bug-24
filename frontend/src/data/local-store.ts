@@ -15,7 +15,11 @@ function readStorage(): Record<string, EntryRow[]> {
   }
   const raw = window.localStorage.getItem(STORAGE_KEY)
   if (!raw) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback))
+    } catch {
+      // 存储不可用（隐私模式/配额已满）时仍可在内存中使用本次数据。
+    }
     return fallback
   }
   try {
@@ -41,11 +45,18 @@ export function listRows(key: string): EntryRow[] {
 }
 
 export function saveRows(key: string, rows: EntryRow[]): void {
-  const next = { ...allRows(), [key]: rows }
-  cache = next
+  const previous = allRows()
+  const next = { ...previous, [key]: rows }
   if (typeof window !== 'undefined' && window.localStorage) {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    // 存储写入失败时回滚内存缓存并抛错，由调用方提示原因，避免内存显示成新值、刷新又丢。
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    } catch (error) {
+      cache = previous
+      throw error instanceof Error ? error : new Error('本地存储写入失败')
+    }
   }
+  cache = next
 }
 
 export function resetRows(key: string): EntryRow[] {

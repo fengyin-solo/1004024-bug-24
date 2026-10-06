@@ -1,9 +1,24 @@
 import { MODULE_BY_KEY } from '@/data/modules'
+import {
+  DEFECT_KEY,
+  isDefectPending,
+  planDefectAction,
+} from '@/data/defect-domain'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
+
+// 缺陷模块以状态判定是否终态（已修复/已忽略都算终态），
+// 其余模块沿用「状态列表最后一项为终态」的通用约定。
+function isPending(meta: ModuleMeta, row: EntryRow): boolean {
+  if (meta.key === DEFECT_KEY) {
+    return isDefectPending(row)
+  }
+  const lastStatus = meta.statuses[meta.statuses.length - 1]
+  return String(row.status) !== lastStatus
+}
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -40,6 +55,27 @@ export function runAction(key: string, id: number, action: string): ActionResult
     return { ok: false, message: `没有找到编号为 ${id} 的${meta.entity}` }
   }
   const current = String(rows[index].status)
+
+  // 缺陷模块走领域层的唯一判定：确认/修复/忽略共用同一份结果，
+  // 终态记录拒绝再流转，重复动作幂等不重复写。
+  if (key === DEFECT_KEY) {
+    const plan = planDefectAction(rows[index], action, target)
+    if (!plan.written) {
+      return { ok: plan.ok, message: plan.message }
+    }
+    try {
+      const updated: EntryRow = { ...rows[index], ...(plan.changes as EntryRow) }
+      const next = [...rows]
+      next[index] = updated
+      saveRows(key, next)
+      return { ok: true, message: plan.message }
+    } catch (error) {
+      // 写失败要说明原因并保留原状态：缓存里的记录不做改动。
+      const reason = error instanceof Error ? error.message : '未知写入错误'
+      return { ok: false, message: `「${action}」执行失败：${reason}，原状态「${current}」保持不变` }
+    }
+  }
+
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
@@ -91,7 +127,8 @@ export function loadOverview(): OverviewResult {
     return {
       name: meta.name,
       created: entries.length,
-      pending: entries.filter((row) => row.pending).length,
+      // 待处理口径以当前状态为准（历史已修复记录不会被旧的 pending 标记误算进来）。
+      pending: entries.filter((row) => isPending(meta, row)).length,
       abnormal: entries.filter((row) => row.abnormal).length,
     }
   })
