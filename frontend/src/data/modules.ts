@@ -1,3 +1,4 @@
+import { DEFECT_ACTION_SOURCES, DEFECT_TERMINAL_STATUSES } from './defects'
 import type { ModuleMeta } from './types'
 
 // 模块元数据由仓库生成时写入：字段、状态、动作、流转目标都在这里，页面不再各自写一遍。
@@ -33,6 +34,8 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["待确认", "已确认", "已修复", "已忽略"],
     actions: ["确认缺陷", "标记修复", "忽略缺陷"],
     actionTargets: {"确认缺陷": "已确认", "标记修复": "已修复", "忽略缺陷": "已忽略"},
+    terminalStatuses: DEFECT_TERMINAL_STATUSES,
+    actionSources: DEFECT_ACTION_SOURCES,
     metrics: ["待确认缺陷", "已修复缺陷", "严重缺陷"],
   },
   {

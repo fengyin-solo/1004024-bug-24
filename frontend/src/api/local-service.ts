@@ -28,6 +28,21 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
+// 动作落库后的待处理标记：登记了终态的模块按终态判定，其余模块维持旧的「最后一个状态」口径。
+function nextPendingFlag(meta: ModuleMeta, target: string): boolean {
+  const terminals = meta.terminalStatuses ?? [meta.statuses[meta.statuses.length - 1]]
+  return !terminals.includes(target)
+}
+
+// 看板待处理口径：登记了终态的模块按当前状态推导，历史终态记录不会因存储标记被算回待处理；
+// 其余模块仍读存储的 pending 标记，行为不变。
+function countPending(meta: ModuleMeta, row: EntryRow): boolean {
+  if (meta.terminalStatuses) {
+    return !meta.terminalStatuses.includes(String(row.status))
+  }
+  return Boolean(row.pending)
+}
+
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
@@ -43,11 +58,18 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
-  const lastStatus = meta.statuses[meta.statuses.length - 1]
+  const allowedSources = meta.actionSources?.[action]
+  if (allowedSources && !allowedSources.includes(current)) {
+    return {
+      ok: false,
+      message: `${meta.entity}当前状态是「${current}」，不能${action}，原状态保持不变`,
+    }
+  }
+  // 只流转状态与待处理标记：严重等级等业务字段一律不动，确认/修复/忽略共用同一份判定结果。
   const updated: EntryRow = {
     ...rows[index],
     status: target,
-    pending: target !== lastStatus,
+    pending: nextPendingFlag(meta, target),
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
   }
   const next = [...rows]
@@ -91,7 +113,7 @@ export function loadOverview(): OverviewResult {
     return {
       name: meta.name,
       created: entries.length,
-      pending: entries.filter((row) => row.pending).length,
+      pending: entries.filter((row) => countPending(meta, row)).length,
       abnormal: entries.filter((row) => row.abnormal).length,
     }
   })

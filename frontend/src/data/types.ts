@@ -18,6 +18,10 @@ export type ModuleMeta = {
   actions: string[]
   actionTargets: Record<string, string>
   metrics: string[]
+  // 终态状态：走到这里就不算待处理；缺省时维持旧逻辑（看存储的 pending 标记）。
+  terminalStatuses?: string[]
+  // 动作允许发起的当前状态；缺省时不做来源校验。
+  actionSources?: Record<string, string[]>
 }
 
 export type PageResult = {

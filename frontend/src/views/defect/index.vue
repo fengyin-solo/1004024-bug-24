@@ -43,9 +43,10 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">{{ cellValue(row, column) }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
+            <button class="link" type="button" @click="openDetail(row)">详情</button>
             <button
               v-for="action in actions"
               :key="action"
@@ -63,6 +64,32 @@
       </tbody>
     </table>
 
+    <aside v-if="selectedRow" class="detail-panel">
+      <header class="detail-head">
+        <h3>缺陷详情：{{ cellValue(selectedRow, '缺陷编号') }}</h3>
+        <button class="btn ghost" type="button" @click="closeDetail">收起详情</button>
+      </header>
+      <dl class="detail-grid">
+        <template v-for="column in columns" :key="column">
+          <dt>{{ column }}</dt>
+          <dd>{{ cellValue(selectedRow, column) }}</dd>
+        </template>
+        <dt>当前状态</dt>
+        <dd>{{ selectedRow.status }}</dd>
+      </dl>
+      <div class="row-actions">
+        <button
+          v-for="action in actions"
+          :key="action"
+          class="link"
+          type="button"
+          @click="runAction(action, selectedRow)"
+        >
+          {{ action }}
+        </button>
+      </div>
+    </aside>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条缺陷记录记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -79,25 +106,44 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import { isSevereDefect, resolveDefectSeverity, SEVERITY_FIELD } from '@/data/defects'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('defect')
 const columns = ["缺陷编号", "所属管线", "缺陷类型", "发现位置", "严重等级", "发现日期", "缺陷描述", "记录状态"]
 const actions = ["确认缺陷", "标记修复", "忽略缺陷"]
 const statuses = ["待确认", "已确认", "已修复", "已忽略"]
-const stats = [{"label": "待确认缺陷", "value": 0}, {"label": "已修复缺陷", "value": 0}, {"label": "严重缺陷", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const selectedId = ref<number | null>(null)
+
+// 统计卡与状态汇总都按当前列表实时计算，和运营概览保持同一口径。
+const stats = computed(() => [
+  { label: '待确认缺陷', value: rows.value.filter((row) => String(row.status) === '待确认').length },
+  { label: '已修复缺陷', value: rows.value.filter((row) => String(row.status) === '已修复').length },
+  { label: '严重缺陷', value: rows.value.filter(isSevereDefect).length },
+])
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const selectedRow = computed(
+  () => rows.value.find((row) => Number(row.id) === selectedId.value) ?? null,
+)
+
+// 严重等级只走统一判定：记录里登记了什么就显示什么，缺等级保留原值（显示为 —）。
+function cellValue(row: EntryRow, column: string): string {
+  if (column === SEVERITY_FIELD) {
+    return resolveDefectSeverity(row) || '—'
+  }
+  return String(row[column] ?? '—')
+}
 
 function resetFilters() {
   filters.value = {}
@@ -110,6 +156,14 @@ function exportRows() {
 
 function openCreate() {
   errorMessage.value = '缺陷记录登记入口尚未接入审批流'
+}
+
+function openDetail(row: EntryRow) {
+  selectedId.value = Number(row.id)
+}
+
+function closeDetail() {
+  selectedId.value = null
 }
 
 function runAction(action: string, row: EntryRow) {
